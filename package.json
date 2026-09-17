@@ -6,22 +6,40 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:seed": "tsx scripts/seed-watchlist.ts",
+    "db:enable-timescale": "tsx scripts/enable-timescaledb.ts",
+    "test:market-data": "tsx scripts/test-market-data.ts",
+    "pipeline:run": "tsx scripts/run-pipeline.ts",
+    "worker": "tsx scripts/worker.ts"
   },
   "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "dotenv": "^17.4.2",
+    "ioredis": "^6.0.0",
+    "jsdom": "^28.1.0",
     "next": "16.3.5",
+    "node-cron": "^4.6.0",
+    "pg": "^8.23.0",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "rss-parser": "^3.13.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^20",
+    "@types/node-cron": "^3.0.11",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "1.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
     "tailwindcss": "^4",
+    "tsx": "^4.23.13",
     "typescript": "^5"
   }
 }

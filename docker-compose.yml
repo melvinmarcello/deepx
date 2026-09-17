@@ -1,0 +1,29 @@
+services:
+  postgres:
+    # Official TimescaleDB image (Linux build) - avoids the Windows-native
+    # extension DLL loading issues we hit installing TimescaleDB directly
+    # into the native PostgreSQL 18 on this machine. Pinned to the exact
+    # version/PG-major we were targeting natively (2.30.0 on PG18).
+    image: timescale/timescaledb:2.30.0-pg18
+    container_name: deepx-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: deepx_dev_password
+      POSTGRES_DB: deepx
+    ports:
+      # Host 5433 -> container 5432, since the native Windows Postgres
+      # service is already bound to host port 5432.
+      - "5433:5432"
+    volumes:
+      # PG18+ images expect a single mount at /var/lib/postgresql (not
+      # .../data) - see https://github.com/docker-library/postgres/pull/1259
+      - deepx_postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d deepx"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  deepx_postgres_data:
