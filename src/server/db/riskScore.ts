@@ -28,7 +28,8 @@ export interface InsertRiskScoreInput {
   coinId: string;
   volatilityScore: number;
   liquidityScore: number;
-  concentrationScore: number;
+  /** null when the coin has no tracked contract, i.e. whale flow is unobservable. */
+  concentrationScore: number | null;
   compositeScore: number;
 }
 

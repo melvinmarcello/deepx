@@ -48,3 +48,52 @@ export async function getRecentDailyCloses(
     close: r.close != null ? Number(r.close) : null,
   }));
 }
+
+/**
+ * Number of distinct days of stored history. The dashboard uses this to say
+ * honestly whether volatility-based metrics have enough data to mean anything.
+ */
+export async function getPriceHistoryDayCount(): Promise<number> {
+  const res = await getPool().query<{ days: string }>(
+    `SELECT count(DISTINCT date) AS days FROM daily_price_agg`
+  );
+  return Number(res.rows[0]?.days ?? 0);
+}
+
+export interface HistoricalDailyBar {
+  coinId: string;
+  date: string; // YYYY-MM-DD
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number | null;
+}
+
+/**
+ * Upserts historical daily bars (e.g. Binance kline backfill). Does not
+ * overwrite today's live pipeline row with an older candle if it would
+ * shrink the already-widened high/low for the current day - we still
+ * update close/volume so the latest known close wins.
+ */
+export async function upsertHistoricalDailyBars(
+  bars: HistoricalDailyBar[]
+): Promise<number> {
+  if (bars.length === 0) return 0;
+  const pool = getPool();
+  let written = 0;
+  for (const b of bars) {
+    const res = await pool.query(
+      `INSERT INTO daily_price_agg (coin_id, date, open, high, low, close, volume)
+       VALUES ($1, $2::date, $3, $4, $5, $6, $7)
+       ON CONFLICT (coin_id, date) DO UPDATE SET
+         high = GREATEST(daily_price_agg.high, EXCLUDED.high),
+         low = LEAST(daily_price_agg.low, EXCLUDED.low),
+         close = EXCLUDED.close,
+         volume = COALESCE(EXCLUDED.volume, daily_price_agg.volume)`,
+      [b.coinId, b.date, b.open, b.high, b.low, b.close, b.volume]
+    );
+    written += res.rowCount ?? 0;
+  }
+  return written;
+}

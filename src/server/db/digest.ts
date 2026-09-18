@@ -32,6 +32,18 @@ export interface UpsertDigestEntryInput {
   compositeSignalScore: number;
 }
 
+/**
+ * Wipe today's digest before writing a new ranking. Upsert alone left
+ * stale ranks for coins that fell out of the top-N between runs on the
+ * same calendar day (e.g. two different coins both showing as rank 1).
+ */
+export async function clearDigestForToday(): Promise<number> {
+  const res = await getPool().query(
+    `DELETE FROM daily_digest WHERE digest_date = CURRENT_DATE`
+  );
+  return res.rowCount ?? 0;
+}
+
 export async function upsertDigestEntry(
   input: UpsertDigestEntryInput
 ): Promise<DigestEntry> {

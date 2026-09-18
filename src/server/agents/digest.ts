@@ -2,7 +2,7 @@ import { chatCompleteJSON } from "../integrations/nineRouter";
 import { getLatestRiskScoreMap } from "../db/riskScore";
 import { getRecentNewsForCoin } from "../db/news";
 import { getRecentFlagsForCoin } from "../db/onchain";
-import { upsertDigestEntry } from "../db/digest";
+import { clearDigestForToday, upsertDigestEntry } from "../db/digest";
 import type { MarketSnapshot, WatchlistCoin } from "../types";
 
 interface CoinSignal {
@@ -138,6 +138,10 @@ export async function runDigestAgent(
   const signals = await buildSignals(watchlist, snapshots);
   signals.sort((a, b) => b.compositeSignalScore - a.compositeSignalScore);
   const top = signals.slice(0, DIGEST_SIZE);
+
+  // Replace the whole day's ranking so coins that fell out of the top-N
+  // do not linger with stale/duplicated ranks.
+  await clearDigestForToday();
 
   const rationales = await generateRationales(top);
 

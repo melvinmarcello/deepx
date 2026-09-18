@@ -1,5 +1,10 @@
 import { getEnv } from "../config/env";
 import { getCachedPrice, setCachedPrice } from "../cache/redis";
+import {
+  fetchBinanceDailyCloses,
+  fetchBinanceTickers,
+  pctChangeFromCloses,
+} from "../integrations/binance";
 import type { MarketSnapshot } from "../types";
 
 /**
@@ -14,6 +19,11 @@ import type { MarketSnapshot } from "../types";
  * fetched from CoinMarketCap in a single batched request and the cache is
  * repopulated. Redis is never the source of truth - a cache failure just
  * degrades to "fetch everything from CoinMarketCap".
+ *
+ * Fallback: when CoinMarketCap is unreachable (common on networks that
+ * reset TLS to pro-api.coinmarketcap.com), we fall back to Binance's
+ * public market-data host. That path has no market-cap / supply fields
+ * and derives 7d change from daily klines.
  *
  * Source: CoinMarketCap `/v1/cryptocurrency/quotes/latest`, queried by
  * ticker `symbol` (not CMC's numeric `id` or `slug`) - symbols are stable,
@@ -50,7 +60,7 @@ interface CmcCoinData {
 }
 
 interface CmcQuotesLatestResponse {
-  status: { error_code: number; error_message: string | null };
+  status: { error_code: number | string; error_message: string | null };
   // CMC returns a single object per symbol normally, or an array if the
   // symbol is ambiguous across multiple listed assets.
   data: Record<string, CmcCoinData | CmcCoinData[]>;
@@ -123,20 +133,77 @@ async function fetchFromCoinMarketCap(
   }
 
   const json = (await res.json()) as CmcQuotesLatestResponse;
-  if (json.status.error_code !== 0) {
+  // CMC sometimes returns error_code as a string ("0") - coerce before comparing.
+  const errorCode = Number(json.status?.error_code ?? -1);
+  if (errorCode !== 0) {
     throw new Error(
       `CoinMarketCap error ${json.status.error_code}: ${json.status.error_message}`
     );
   }
+  if (!json.data || typeof json.data !== "object") {
+    throw new Error(
+      `CoinMarketCap returned no data payload (error_code=${json.status?.error_code}, message=${json.status?.error_message})`
+    );
+  }
 
   const map = new Map<string, MarketSnapshot>();
-  for (const [symbol, entry] of Object.entries(json.data)) {
+  for (const [key, entry] of Object.entries(json.data)) {
     const row = pickBestMatch(entry);
+    // v1 keys by symbol ("BTC"); v3 keys by index ("0") - always prefer
+    // the row's own symbol when looking up our watchlist mapping.
+    const symbol = (row.symbol || key).toUpperCase();
     const coinIds = symbolToCoinIds.get(symbol) ?? [];
     for (const coinId of coinIds) {
       map.set(coinId, toSnapshot(coinId, row, false));
     }
   }
+  return map;
+}
+
+/**
+ * Binance public fallback. No market-cap / supply. 7d change comes from
+ * daily klines (one request per coin - fine for a ~25-coin watchlist).
+ */
+async function fetchFromBinance(
+  coins: MarketDataInput[]
+): Promise<Map<string, MarketSnapshot>> {
+  const tickers = await fetchBinanceTickers(coins.map((c) => c.symbol));
+  const map = new Map<string, MarketSnapshot>();
+
+  for (const coin of coins) {
+    const t = tickers.get(coin.symbol.toUpperCase());
+    if (!t) continue;
+
+    let pct7d: number | null = null;
+    try {
+      const closes = await fetchBinanceDailyCloses(coin.symbol, 10);
+      pct7d = pctChangeFromCloses(closes, 7);
+    } catch (err) {
+      console.warn(
+        `[market-data] Binance 7d kline failed for ${coin.symbol}:`,
+        err instanceof Error ? err.message : err
+      );
+    }
+
+    map.set(coin.coinId, {
+      coinId: coin.coinId,
+      symbol: coin.symbol.toUpperCase(),
+      name: coin.symbol.toUpperCase(),
+      priceUsd: t.lastPrice,
+      marketCapUsd: null,
+      volume24hUsd: t.quoteVolume,
+      priceChangePct1h: null,
+      priceChangePct24h: t.priceChangePercent,
+      priceChangePct7d: pct7d,
+      circulatingSupply: null,
+      totalSupply: null,
+      ath: null,
+      athChangePercentage: null,
+      lastUpdated: new Date().toISOString(),
+      fromCache: false,
+    });
+  }
+
   return map;
 }
 
@@ -166,7 +233,17 @@ export async function fetchMarketSnapshots(
 
   for (let i = 0; i < missing.length; i += BATCH_SIZE) {
     const chunk = missing.slice(i, i + BATCH_SIZE);
-    const fetched = await fetchFromCoinMarketCap(chunk);
+    let fetched: Map<string, MarketSnapshot>;
+    try {
+      fetched = await fetchFromCoinMarketCap(chunk);
+    } catch (err) {
+      console.warn(
+        `[market-data] CoinMarketCap failed, falling back to Binance:`,
+        err instanceof Error ? err.message : err
+      );
+      fetched = await fetchFromBinance(chunk);
+    }
+
     for (const [coinId, snapshot] of fetched) {
       results.set(coinId, snapshot);
       await setCachedPrice(coinId, snapshot);
@@ -174,7 +251,7 @@ export async function fetchMarketSnapshots(
     for (const coin of chunk) {
       if (!fetched.has(coin.coinId)) {
         console.warn(
-          `[market-data] CoinMarketCap returned no row for symbol "${coin.symbol}" (coinId "${coin.coinId}") - check the ticker is correct.`
+          `[market-data] No row for symbol "${coin.symbol}" (coinId "${coin.coinId}") from CMC or Binance.`
         );
       }
     }

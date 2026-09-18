@@ -12,6 +12,8 @@
     "db:enable-timescale": "tsx scripts/enable-timescaledb.ts",
     "test:market-data": "tsx scripts/test-market-data.ts",
     "pipeline:run": "tsx scripts/run-pipeline.ts",
+    "pipeline:backfill-history": "tsx scripts/backfill-history.ts",
+    "pipeline:rescore": "tsx scripts/rescore.ts",
     "worker": "tsx scripts/worker.ts"
   },
   "dependencies": {

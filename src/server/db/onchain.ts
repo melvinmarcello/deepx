@@ -75,3 +75,14 @@ export async function getRecentFlags(limit = 50): Promise<OnchainFlag[]> {
   );
   return res.rows.map(toOnchainFlag);
 }
+
+/** Flag counts per coin in one round-trip, for the screener table. */
+export async function getFlagCountsByCoin(sinceHours = 24): Promise<Map<string, number>> {
+  const res = await getPool().query<{ coin_id: string; count: string }>(
+    `SELECT coin_id, count(*) AS count FROM onchain_flags
+     WHERE flagged_at >= now() - ($1 || ' hours')::interval
+     GROUP BY coin_id`,
+    [sinceHours]
+  );
+  return new Map(res.rows.map((r) => [r.coin_id, Number(r.count)]));
+}
